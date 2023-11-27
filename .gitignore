@@ -5,3 +5,4 @@ media
 *.anki2
 *.anki21
 *.csv
+.DS_Store
