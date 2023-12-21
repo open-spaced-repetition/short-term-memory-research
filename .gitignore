@@ -6,3 +6,5 @@ media
 *.anki21
 *.csv
 .DS_Store
+*.revlog
+*.pyc
