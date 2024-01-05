@@ -87,7 +87,7 @@ def process(filename):
         plt.ylabel("recall probability")
         plt.legend()
         plt.grid()
-        plt.savefig(f"./plots/{hash_id}_{r_history}.png")
+        plt.savefig(f"./short_term_forgetting_curve/{hash_id}_{r_history}.png")
         plt.clf()
 
 
