@@ -1,18 +1,12 @@
-import os
-import sys
-
-sys.path.insert(0, os.path.abspath("../fsrs-optimizer/src/fsrs_optimizer/"))
 from fsrs_optimizer import (
-    remove_outliers,
-    remove_non_continuous_rows,
     power_forgetting_curve,
+    fit_stability,
 )
 
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from scipy.optimize import minimize
 from itertools import accumulate
 
 plt.style.use("ggplot")
@@ -53,18 +47,7 @@ def create_time_series(df):
     df = df[df["delta_t"] != 0].copy()
     df["i"] = df.groupby("card_id").cumcount() + 1
     df["first_rating"] = df["r_history"].map(lambda x: x[0] if len(x) > 0 else "")
-    filtered_dataset = (
-        df[df["i"] == 2]
-        .groupby(by=["first_rating"], as_index=False, group_keys=False)
-        .apply(remove_outliers)
-    )
-    if filtered_dataset.empty:
-        return pd.DataFrame()
-    df[df["i"] == 2] = filtered_dataset
     df.dropna(inplace=True)
-    df = df.groupby("card_id", as_index=False, group_keys=False).apply(
-        remove_non_continuous_rows
-    )
     return df[df["delta_t"] > 0].sort_values(by=["review_th"])
 
 
@@ -74,16 +57,6 @@ if __name__ == "__main__":
     )[:32]
     for path in sorted_files:
         df = create_time_series(pd.read_csv(path))
-        try:
-            df[df["i"] == 2] = (
-                df[df["i"] == 2]
-                .groupby(
-                    by=["r_history", "t_history"], as_index=False, group_keys=False
-                )
-                .apply(remove_outliers)
-            )
-        except:
-            continue
 
         ratings = set()
         for r_history in df[df["i"] == 2]["r_history"].value_counts().head(5).index:
@@ -100,23 +73,7 @@ if __name__ == "__main__":
             y_mean = tmp["y"]["mean"]
             y_count = tmp["y"]["count"]
             count_percent = np.array([x / sum(y_count) for x in y_count])
-            weight = np.sqrt(y_count)
-
-            def loss(stability):
-                y_pred = power_forgetting_curve(delta_t, stability)
-                logloss = sum(
-                    -(y_mean * np.log(y_pred) + (1 - y_mean) * np.log(1 - y_pred))
-                    * weight
-                )
-                return logloss
-
-            res = minimize(
-                loss,
-                x0=1,
-                bounds=((0.01, 100),),
-            )
-            params = res.x
-            stability = params[0]
+            stability = fit_stability(delta_t, y_mean, y_count)
 
             plt.figure(r_history[0])
             ratings.add(r_history[0])
