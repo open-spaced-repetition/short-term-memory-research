@@ -53,8 +53,8 @@ def create_time_series(df):
 
 if __name__ == "__main__":
     sorted_files = sorted(
-        Path("../fsrs-benchmark/dataset").glob("*.csv"), key=lambda x: int(x.stem)
-    )[:32]
+        Path("../FSRS-Anki-20k/dataset/1").glob("*.csv"), key=lambda x: int(x.stem)
+    )[:64]
     for path in sorted_files:
         df = create_time_series(pd.read_csv(path))
 

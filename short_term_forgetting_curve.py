@@ -159,7 +159,7 @@ def process_revlog(revlog):
 
 if __name__ == "__main__":
     dataset_path = "../FSRS-Anki-20k/revlogs/1/"
-    files = sorted(Path(dataset_path).glob("*.revlog"), key=lambda x: int(x.stem))[:32]
+    files = sorted(Path(dataset_path).glob("*.revlog"), key=lambda x: int(x.stem))[:64]
     Path("./short_term_forgetting_curve").mkdir(parents=True, exist_ok=True)
     for path in files:
         process_revlog(path)
