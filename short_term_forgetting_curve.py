@@ -42,15 +42,19 @@ def fit_stability(delta_t, retention, size):
         )
         return loss
 
-    res = minimize(loss, x0=1)
+    res = minimize(loss, x0=1, bounds=[(0.1, None)])
     return res.x[0]
 
 
 def to_days(value, position):
-    return f"{value/1440:.1f}"
+    return f"{value/60/60/24:.1f}"
 
 
 def to_hours(value, position):
+    return f"{value/60/60:.1f}"
+
+
+def to_minutes(value, position):
     return f"{value/60:.2f}"
 
 
@@ -106,7 +110,7 @@ def process_revlog(revlog):
             lambda x: (
                 round(np.power(1.4, np.floor(np.log(x) / np.log(1.4))), 2)
                 if x > 0
-                else 0
+                else 1
             )
         )
         df["y"] = df["rating"].map(lambda x: 1 if x > 1 else 0)
@@ -117,40 +121,50 @@ def process_revlog(revlog):
             .reset_index()
             .copy()
         )
-        tmp = tmp[(tmp["y"]["count"] >= 25) & (tmp["t_bin"] <= 1440)]
         if tmp.empty:
             continue
 
         delta_t = tmp["t_bin"]
         y_mean = tmp["y"]["mean"]
         y_count = tmp["y"]["count"]
+        sample_size = sum(y_count)
         count_percent = np.array([x / sum(y_count) for x in y_count])
         fig = plt.figure()
         ax = fig.add_subplot(111)
         ax.scatter(delta_t, y_mean, s=count_percent * 1000, alpha=0.5)
         s = fit_stability(delta_t, y_mean, y_count)
         s_text = (
-            f"{s:.2f}min"
+            f"{s:.2f}s"
             if s < 60
-            else f"{s/60:.2f}h" if s < 1440 else f"{s/1440:.2f}d"
+            else (
+                f"{s/60:.2f}min"
+                if s < 60 * 60
+                else (
+                    f"{s/(60 * 60):.2f}h"
+                    if s < (60 * 60 * 24)
+                    else f"{s/(60 * 60 * 24):.2f}d"
+                )
+            )
         )
+        t_lim = df[df["r_history"] == r_history]["t_bin"].quantile(0.8)
         ax.plot(
-            np.linspace(0, tmp["t_bin"].max(), 100),
-            power_forgetting_curve(np.linspace(0, tmp["t_bin"].max(), 100), s),
+            np.linspace(0, t_lim, 100),
+            power_forgetting_curve(np.linspace(0, t_lim, 100), s),
             "r-",
             label=f"fit: s={s_text}",
         )
-        ax.set_xlim(left=0)
-        if s > 1440:
+        ax.set_xlim(0, t_lim)
+        if t_lim > 60 * 60 * 24 * 4:
             ax.xaxis.set_major_formatter(plt.FuncFormatter(to_days))
             ax.set_xlabel("time (days)")
-        elif s > 60:
+        elif t_lim > 60 * 60 * 4:
             ax.xaxis.set_major_formatter(plt.FuncFormatter(to_hours))
             ax.set_xlabel("time (hours)")
         else:
+            ax.xaxis.set_major_formatter(plt.FuncFormatter(to_minutes))
             ax.set_xlabel("time (minutes)")
-        ax.set_title(f"r_history={r_history}")
-        ax.set_ylim(0.25, 1)
+        ax.set_title(f"r_history={r_history} | sample_size={sample_size}")
+        ax.set_ylim(None, 1)
         ax.set_ylabel("recall probability")
         ax.legend()
         fig.savefig(f"./short_term_forgetting_curve/{revlog.stem}_{r_history}.png")
