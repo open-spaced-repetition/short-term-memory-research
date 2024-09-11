@@ -113,9 +113,10 @@ def process_revlog(revlog):
                 else 1
             )
         )
+        t_lim = df[df["r_history"] == r_history]["t_bin"].quantile(0.8)
         df["y"] = df["rating"].map(lambda x: 1 if x > 1 else 0)
         tmp = (
-            df[df["r_history"] == r_history]
+            df[(df["r_history"] == r_history) & (df["t_bin"] <= t_lim)]
             .groupby("t_bin")
             .agg({"y": ["mean", "count"]})
             .reset_index()
@@ -146,7 +147,6 @@ def process_revlog(revlog):
                 )
             )
         )
-        t_lim = df[df["r_history"] == r_history]["t_bin"].quantile(0.8)
         ax.plot(
             np.linspace(0, t_lim, 100),
             power_forgetting_curve(np.linspace(0, t_lim, 100), s),
