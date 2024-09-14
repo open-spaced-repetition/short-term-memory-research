@@ -10,6 +10,9 @@ from fsrs_optimizer import power_forgetting_curve
 plt.style.use("ggplot")
 
 
+short_term_stabilty_list = []
+
+
 def cum_concat(x):
     return list(accumulate(x))
 
@@ -31,6 +34,22 @@ def convert_native(entries):
             "review_state": entry.review_kind,
         },
         filter_revlog(entries),
+    )
+
+
+def format_t(s):
+    return (
+        f"{s:.2f}s"
+        if s < 60
+        else (
+            f"{s/60:.2f}min"
+            if s < 60 * 60
+            else (
+                f"{s/(60 * 60):.2f}h"
+                if s < (60 * 60 * 24)
+                else f"{s/(60 * 60 * 24):.2f}d"
+            )
+        )
     )
 
 
@@ -79,8 +98,13 @@ def process_revlog(revlog):
     df["review_time"] = df["review_time"].astype(int)
     df["delta_t"] = df["review_time"].diff().fillna(0).astype(int) // 1000
     df["i"] = df.groupby("card_id").cumcount() + 1
-    df.loc[df["i"] == 1, "delta_t"] = -1
-
+    df.loc[df["i"] == 1, "delta_t"] = 0
+    df["delta_t_f"] = df["delta_t"].map(format_t)
+    df["t_bin"] = df["delta_t"].map(
+        lambda x: (
+            round(np.power(1.4, np.floor(np.log(x) / np.log(1.4))), 2) if x > 0 else 1
+        )
+    )
     t_history = df.groupby("card_id", group_keys=False)["delta_t"].apply(
         lambda x: cum_concat([[round(i, 2)] for i in x])
     )
@@ -93,6 +117,13 @@ def process_revlog(revlog):
     df["r_history"] = [
         ",".join(map(str, item[:-1])) for sublist in r_history for item in sublist
     ]
+    t_f_history = df.groupby("card_id", group_keys=False)["delta_t_f"].apply(
+        lambda x: cum_concat([[i] for i in x])
+    )
+    df["t_f_history"] = [
+        ",".join(map(str, item[:-1])) for sublist in t_f_history for item in sublist
+    ]
+    df.to_csv(f"./processed/{revlog.stem}.csv", index=False)
 
     for r_history in (
         "1",
@@ -106,13 +137,6 @@ def process_revlog(revlog):
         "3,3",
         "3,3,3",
     ):
-        df["t_bin"] = df["delta_t"].map(
-            lambda x: (
-                round(np.power(1.4, np.floor(np.log(x) / np.log(1.4))), 2)
-                if x > 0
-                else 1
-            )
-        )
         t_lim = df[df["r_history"] == r_history]["t_bin"].quantile(0.8)
         df["y"] = df["rating"].map(lambda x: 1 if x > 1 else 0)
         tmp = (
@@ -133,18 +157,27 @@ def process_revlog(revlog):
         fig = plt.figure()
         ax = fig.add_subplot(111)
         ax.scatter(delta_t, y_mean, s=count_percent * 1000, alpha=0.5)
-        s = fit_stability(delta_t, y_mean, y_count)
-        s_text = (
-            f"{s:.2f}s"
-            if s < 60
-            else (
-                f"{s/60:.2f}min"
-                if s < 60 * 60
-                else (
-                    f"{s/(60 * 60):.2f}h"
-                    if s < (60 * 60 * 24)
-                    else f"{s/(60 * 60 * 24):.2f}d"
-                )
+        s = max(round(fit_stability(delta_t, y_mean, y_count)), 1)
+        s_text = format_t(s)
+        average_delta_t = round(
+            df[(df["r_history"] == r_history) & (df["t_bin"] <= t_lim)][
+                "delta_t"
+            ].mean()
+        )
+        average_delta_t_text = format_t(average_delta_t)
+        average_retention = round(df[(df["r_history"] == r_history) & (df["t_bin"] <= t_lim)][
+            "y"
+        ].mean(), 4)
+        short_term_stabilty_list.append(
+            (
+                revlog.stem,
+                r_history,
+                s,
+                s_text,
+                average_delta_t,
+                average_delta_t_text,
+                average_retention,
+                sample_size,
             )
         )
         ax.plot(
@@ -177,3 +210,9 @@ if __name__ == "__main__":
     Path("./short_term_forgetting_curve").mkdir(parents=True, exist_ok=True)
     for path in files:
         process_revlog(path)
+
+    short_term_stabilty_df = pd.DataFrame(
+        short_term_stabilty_list,
+        columns=["user", "r_history", "stability", "s_text", "average_delta_t", "average_delta_t_text", "average_retention", "sample_size"],
+    )
+    short_term_stabilty_df.to_csv("./short_term_stability.tsv", sep="\t", index=False)
