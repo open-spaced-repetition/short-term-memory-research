@@ -1,17 +1,18 @@
 import argparse
 import pandas as pd
 import numpy as np
+import pyarrow.parquet as pq  # type: ignore
 from matplotlib import pyplot as plt
 from pathlib import Path
-from scipy.optimize import minimize
-from stats_pb2 import RevlogEntries
+from scipy.optimize import minimize  # type: ignore
 from itertools import accumulate
-from fsrs_optimizer import power_forgetting_curve
+from fsrs_optimizer import power_forgetting_curve  # type: ignore
 
 plt.style.use("ggplot")
 
 plot = False
 short_term_stabilty_list: list = []
+dataset_path = "../anki-revlogs/revlogs"
 
 
 def cum_concat(x):
@@ -78,35 +79,22 @@ def to_minutes(value, position):
     return f"{value/60:.2f}"
 
 
-def process_revlog(revlog):
-    data = open(revlog, "rb").read()
-    entries = RevlogEntries.FromString(data)
-    df = pd.DataFrame(convert_native(entries.entries))
+def process(user_id):
+    df = pd.read_parquet(dataset_path, filters=[("user_id", "=", user_id)])
 
     if df.empty:
         return 0
 
-    df["is_learn_start"] = (df["review_state"] == 0) & (df["review_state"].shift() != 0)
-    df["sequence_group"] = df["is_learn_start"].cumsum()
-    last_learn_start = (
-        df[df["is_learn_start"]].groupby("card_id")["sequence_group"].last()
-    )
-    df["last_learn_start"] = df["card_id"].map(last_learn_start).fillna(0).astype(int)
-    df["mask"] = df["last_learn_start"] <= df["sequence_group"]
-    df = df[df["mask"] == True]
-    df = df.groupby("card_id").filter(lambda group: group["review_state"].iloc[0] == 0)
-
-    df["review_time"] = df["review_time"].astype(int)
-    df["delta_t"] = df["review_time"].diff().fillna(0).astype(int) // 1000
+    df["review_th"] = range(1, df.shape[0] + 1)
+    df.sort_values(by=["card_id", "review_th"], inplace=True)
     df["i"] = df.groupby("card_id").cumcount() + 1
-    df.loc[df["i"] == 1, "delta_t"] = 0
-    df["delta_t_f"] = df["delta_t"].map(format_t)
-    df["t_bin"] = df["delta_t"].map(
+    df["delta_t_f"] = df["elapsed_seconds"].map(format_t)
+    df["t_bin"] = df["elapsed_seconds"].map(
         lambda x: (
             round(np.power(1.4, np.floor(np.log(x) / np.log(1.4))), 2) if x > 0 else 1
         )
     )
-    t_history = df.groupby("card_id", group_keys=False)["delta_t"].apply(
+    t_history = df.groupby("card_id", group_keys=False)["elapsed_seconds"].apply(
         lambda x: cum_concat([[round(i, 2)] for i in x])
     )
     df["t_history"] = [
@@ -125,7 +113,7 @@ def process_revlog(revlog):
         ",".join(map(str, item[:-1])) for sublist in t_f_history for item in sublist
     ]
     df["y"] = df["rating"].map(lambda x: 1 if x > 1 else 0)
-    df.to_csv(f"./processed/{revlog.stem}.csv", index=False)
+    df.to_csv(f"./processed/{user_id}.csv", index=False)
 
     for r_history in (
         "1",
@@ -143,7 +131,7 @@ def process_revlog(revlog):
         "3,3,3",
     ):
         t_lim = df[df["r_history"] == r_history]["t_bin"].quantile(0.8)
-        
+
         tmp = (
             df[(df["r_history"] == r_history) & (df["t_bin"] <= t_lim)]
             .groupby("t_bin")
@@ -165,7 +153,7 @@ def process_revlog(revlog):
         s_text = format_t(s)
         average_delta_t = round(
             df[(df["r_history"] == r_history) & (df["t_bin"] <= t_lim)][
-                "delta_t"
+                "elapsed_seconds"
             ].mean()
         )
         average_delta_t_text = format_t(average_delta_t)
@@ -174,7 +162,7 @@ def process_revlog(revlog):
         )
         short_term_stabilty_list.append(
             (
-                revlog.stem,
+                user_id,
                 r_history,
                 s,
                 s_text,
@@ -208,7 +196,7 @@ def process_revlog(revlog):
             ax.set_ylim(None, 1)
             ax.set_ylabel("recall probability")
             ax.legend()
-            fig.savefig(f"./short_term_forgetting_curve/{revlog.stem}_{r_history}.png")
+            fig.savefig(f"./short_term_forgetting_curve/{user_id}_{r_history}.png")
             plt.close(fig)
 
 
@@ -217,11 +205,11 @@ if __name__ == "__main__":
     parser.add_argument("--plot", action="store_true")
     args = parser.parse_args()
     plot = args.plot
-    dataset_path = "../FSRS-Anki-20k/revlogs/1/"
-    files = sorted(Path(dataset_path).glob("*.revlog"), key=lambda x: int(x.stem))[:64]
+    dataset = pq.ParquetDataset(dataset_path)
+    users = sorted(dataset.partitioning.dictionaries[0], key=lambda x: x.as_py())[:64]
     Path("./short_term_forgetting_curve").mkdir(parents=True, exist_ok=True)
-    for path in files:
-        process_revlog(path)
+    for user in users:
+        process(user)
 
     short_term_stabilty_df = pd.DataFrame(
         short_term_stabilty_list,

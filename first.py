@@ -1,4 +1,4 @@
-from fsrs_optimizer import (
+from fsrs_optimizer import (  # type: ignore
     power_forgetting_curve,
     fit_stability,
 )
@@ -6,10 +6,12 @@ from fsrs_optimizer import (
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
+import pyarrow.parquet as pq  # type: ignore
 from pathlib import Path
 from itertools import accumulate
 
 plt.style.use("ggplot")
+dataset_path = "../anki-revlogs/revlogs"
 
 
 def cum_concat(x):
@@ -17,9 +19,11 @@ def cum_concat(x):
 
 
 def create_time_series(df):
+    df["review_th"] = range(1, df.shape[0] + 1)
+    df.sort_values(by=["card_id", "review_th"], inplace=True)
     df = df[df["rating"].isin([1, 2, 3, 4])].copy()
     df["i"] = df.groupby("card_id").cumcount() + 1
-    t_history_list = df.groupby("card_id", group_keys=False)["delta_t"].apply(
+    t_history_list = df.groupby("card_id", group_keys=False)["elapsed_days"].apply(
         lambda x: cum_concat([[i] for i in x])
     )
     r_history_list = df.groupby("card_id", group_keys=False)["rating"].apply(
@@ -44,25 +48,28 @@ def create_time_series(df):
                 last_rating.append(r_history[0])
     df["last_rating"] = last_rating
     df["y"] = df["rating"].map(lambda x: {1: 0, 2: 1, 3: 1, 4: 1}[x])
-    df = df[df["delta_t"] != 0].copy()
+    df = df[df["elapsed_days"] != 0].copy()
     df["i"] = df.groupby("card_id").cumcount() + 1
     df["first_rating"] = df["r_history"].map(lambda x: x[0] if len(x) > 0 else "")
     df.dropna(inplace=True)
-    return df[df["delta_t"] > 0].sort_values(by=["review_th"])
+    return df[df["elapsed_days"] > 0].sort_values(by=["review_th"])
 
 
 if __name__ == "__main__":
-    sorted_files = sorted(
-        Path("../FSRS-Anki-20k/dataset/1").glob("*.csv"), key=lambda x: int(x.stem)
-    )[:64]
-    for path in sorted_files:
-        df = create_time_series(pd.read_csv(path))
+    dataset = pq.ParquetDataset(dataset_path)
+    plot_path = Path("./first_forgetting_curve")
+    plot_path.mkdir(exist_ok=True)
+    users = sorted(dataset.partitioning.dictionaries[0], key=lambda x: x.as_py())[:64]
+    for user_id in users:
+        df = create_time_series(
+            pd.read_parquet(dataset_path, filters=[("user_id", "=", user_id)])
+        )
 
         ratings = set()
         for r_history in df[df["i"] == 2]["r_history"].value_counts().head(5).index:
             tmp = (
                 df[df["r_history"] == r_history]
-                .groupby("delta_t")
+                .groupby("elapsed_days")
                 .agg(
                     {
                         "y": ["mean", "count"],
@@ -88,9 +95,9 @@ if __name__ == "__main__":
             plt.legend()
             plt.xlabel("delta_t")
             plt.ylabel("retention")
-            plt.title(f"user {path.stem}")
+            plt.title(f"user {user_id}")
 
         for rating in ratings:
             plt.figure(str(rating))
-            plt.savefig(f"./first_forgetting_curve/{path.stem}-{rating}.png")
+            plt.savefig(plot_path / f"{user_id}-{rating}.png")
             plt.cla()
