@@ -11,7 +11,7 @@ from pathlib import Path
 from itertools import accumulate
 
 plt.style.use("ggplot")
-dataset_path = "../anki-revlogs/revlogs"
+dataset_path = "../anki-revlogs-10k/revlogs"
 
 
 def cum_concat(x):

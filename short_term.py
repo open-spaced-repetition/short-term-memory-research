@@ -12,7 +12,7 @@ plt.style.use("ggplot")
 
 plot = False
 short_term_stabilty_list: list = []
-dataset_path = "../anki-revlogs/revlogs"
+dataset_path = "../anki-revlogs-10k/revlogs"
 
 
 def cum_concat(x):
