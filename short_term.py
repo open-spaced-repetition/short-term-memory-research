@@ -130,7 +130,9 @@ def process(user_id):
         "3,3",
         "3,3,3",
     ):
-        t_lim = df[df["r_history"] == r_history]["t_bin"].quantile(0.8)
+        t_lim = (
+            df[df["r_history"] == r_history]["t_bin"].quantile(0.8) if plot else np.inf
+        )
 
         tmp = (
             df[(df["r_history"] == r_history) & (df["t_bin"] <= t_lim)]
@@ -156,6 +158,11 @@ def process(user_id):
                 "elapsed_seconds"
             ].mean()
         )
+        median_delta_t = round(
+            df[(df["r_history"] == r_history) & (df["t_bin"] <= t_lim)][
+                "elapsed_seconds"
+            ].median()
+        )
         average_delta_t_text = format_t(average_delta_t)
         average_retention = round(
             df[(df["r_history"] == r_history) & (df["t_bin"] <= t_lim)]["y"].mean(), 4
@@ -168,6 +175,7 @@ def process(user_id):
                 s_text,
                 average_delta_t,
                 average_delta_t_text,
+                median_delta_t,
                 average_retention,
                 sample_size,
             )
@@ -220,6 +228,7 @@ if __name__ == "__main__":
             "s_text",
             "average_delta_t",
             "average_delta_t_text",
+            "median_delta_t",
             "average_retention",
             "sample_size",
         ],
